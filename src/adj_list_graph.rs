@@ -37,6 +37,8 @@ impl<T> AdjListGraph<T> {
     fn connect_directed(&mut self, src: usize, target: usize) {
         if let Some(set) = self.adj_lists.get_mut(src) {
             set.insert(target);
+        } else {
+            panic!("Index out of bounds: the len is {} but the index is {}", self.adj_lists.len(), src);
         }
     }
 
@@ -103,10 +105,6 @@ impl<T> AdjListGraph<T> {
     }
 
     pub fn add_directed_edge(&mut self, v: usize, w: usize) {
-        if !self.is_in_bounds(v, w) {
-            return;
-        }
-
         self.connect_directed(v, w);
     }
 

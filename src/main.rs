@@ -26,47 +26,47 @@ fn main() {
         .unwrap()
         .into_iter()
         .collect::<Vec<_>>();
-    let num_queries = corpus.len() / 10;
+    let num_queries = corpus.len() ;
     let queries = BufferedDataset::<'_, Row<OrderedFloat<f32>>, f32>::open(path, "learn")
         .unwrap()
         .into_iter()
         .take(num_queries)
         .collect::<Vec<_>>();
-    let knns = BufferedDataset::<'_, Row<usize>, _>::open(path, "learn_neighbors").unwrap();
-    let distances = BufferedDataset::<'_, Row<f32>, _>::open(path, "distances").unwrap();
+    //let knns = BufferedDataset::<'_, Row<usize>, _>::open(path, "neighbors").unwrap();
+    //let distances = BufferedDataset::<'_, Row<f32>, _>::open(path, "distances").unwrap();
 
     info!("Number of queries: {}", queries.len());
     info!("Corpus size: {}", corpus.len());
 
     // Ground truth computation
     info!("Computing ground truth nearest neighbors...");
-    //let ground_truth = queries
-    //    .par_iter()
-    //    .map(|q| {
-    //        let mut closest = corpus
-    //            .iter()
-    //            .enumerate()
-    //            .map(|(k, d)| Distance::new(d.distance(&q), k, d))
-    //            .min_k(100);
-    //        closest.sort();
-    //        closest
-    //            .iter()
-    //            .map(|d| (d.key, d.distance))
-    //            .collect::<Vec<_>>()
-    //    })
-    //    .collect::<Vec<_>>();
-    let ground_truth = knns
-        .into_iter()
-        .take(num_queries)
-        .zip(distances.into_iter().take(num_queries))
-        .map(|(knn, distance)| {
-            knn.data
+    let ground_truth = queries
+        .par_iter()
+        .map(|q| {
+            let mut closest = corpus
                 .iter()
-                .copied()
-                .zip(distance.data.iter().copied().map(OrderedFloat))
+                .enumerate()
+                .map(|(k, d)| Distance::new(d.distance(&q), k, d))
+                .min_k(100);
+            closest.sort();
+            closest
+                .iter()
+                .map(|d| (d.key, d.distance))
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
+    //let ground_truth = knns
+    //    .into_iter()
+    //    .take(num_queries)
+    //    .zip(distances.into_iter().take(num_queries))
+    //    .map(|(knn, distance)| {
+    //        knn.data
+    //            .iter()
+    //            .copied()
+    //            .zip(distance.data.iter().copied().map(OrderedFloat))
+    //            .collect::<Vec<_>>()
+    //    })
+    //    .collect::<Vec<_>>();
 
     let ground_truth_keys = ground_truth
         .iter()
@@ -80,7 +80,7 @@ fn main() {
     .build(
         queries.iter().take(queries.len() / 10).cloned().collect(),
         corpus,
-        ground_truth_keys.iter().cloned().collect(),
+        ground_truth_keys.iter().take(queries.len() / 10).cloned().collect(),
     );
 
     info!("Evaluating recall...");
