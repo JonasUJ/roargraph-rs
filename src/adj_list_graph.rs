@@ -38,7 +38,11 @@ impl<T> AdjListGraph<T> {
         if let Some(set) = self.adj_lists.get_mut(src) {
             set.insert(target);
         } else {
-            panic!("Index out of bounds: the len is {} but the index is {}", self.adj_lists.len(), src);
+            panic!(
+                "Index out of bounds: the len is {} but the index is {}",
+                self.adj_lists.len(),
+                src
+            );
         }
     }
 
@@ -63,23 +67,23 @@ impl<T> AdjListGraph<T> {
         }
     }
 
-    fn add_edges(&mut self, edges: impl Iterator<Item=(usize, usize)>) {
+    fn add_edges(&mut self, edges: impl Iterator<Item = (usize, usize)>) {
         for (v, w) in edges {
             self.add_edge(v, w);
         }
     }
 
-    fn add_directed_edges(&mut self, edges: impl Iterator<Item=(usize, usize)>) {
+    fn add_directed_edges(&mut self, edges: impl Iterator<Item = (usize, usize)>) {
         for (v, w) in edges {
             self.add_directed_edge(v, w);
         }
     }
 
-    fn add_neighbors(&mut self, v: usize, neighbors: impl Iterator<Item=usize>) {
+    fn add_neighbors(&mut self, v: usize, neighbors: impl Iterator<Item = usize>) {
         self.add_edges(neighbors.map(|w| (v, w)));
     }
 
-    pub fn set_neighbors(&mut self, v: usize, neighbors: impl Iterator<Item=usize>) {
+    pub fn set_neighbors(&mut self, v: usize, neighbors: impl Iterator<Item = usize>) {
         self.adj_lists[v].clear();
         self.adj_lists[v].extend(neighbors);
     }
@@ -117,7 +121,7 @@ impl<T> AdjListGraph<T> {
         self.disconnect_directed(w, v);
     }
 
-    pub fn neighborhood(&self, v: usize) -> impl Iterator<Item=usize> {
+    pub fn neighborhood(&self, v: usize) -> impl Iterator<Item = usize> {
         if let Some(set) = self.adj_lists.get(v) {
             return set.iter().copied();
         }
@@ -151,7 +155,7 @@ impl<T> Default for AdjListGraph<T> {
 }
 
 impl<T> FromIterator<T> for AdjListGraph<T> {
-    fn from_iter<I: IntoIterator<Item=T>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let nodes = iter.into_iter().collect::<Vec<T>>();
         let count = nodes.len();
         Self {
@@ -170,8 +174,8 @@ mod tests {
     pub fn unordered_eq<T, I1, I2>(a: I1, b: I2) -> bool
     where
         T: Eq + Hash,
-        I1: IntoIterator<Item=T>,
-        I2: IntoIterator<Item=T>,
+        I1: IntoIterator<Item = T>,
+        I2: IntoIterator<Item = T>,
     {
         let a: HashSet<_> = a.into_iter().collect();
         let b: HashSet<_> = b.into_iter().collect();
@@ -216,10 +220,7 @@ mod tests {
             graph.add_edge(1, i);
         }
         assert!(unordered_eq(graph.neighborhood(0), 1..6));
-        assert!(unordered_eq(
-            graph.neighborhood(1),
-            vec![0, 2, 3, 4, 5]
-        ));
+        assert!(unordered_eq(graph.neighborhood(1), vec![0, 2, 3, 4, 5]));
 
         graph.clear_edges(1);
         assert!(unordered_eq(graph.neighborhood(0), 2..6));

@@ -3,125 +3,12 @@ use crate::point::{Distance, Point};
 use min_max_heap::MinMaxHeap;
 use rayon::prelude::*;
 use std::collections::{BinaryHeap, HashSet};
+use std::ops::Div;
 use tracing::info;
-
-// Heuristic
-pub(crate) fn select_neighbors<'a, P: Point>(
-    candidates: &mut MinMaxHeap<Distance<'a, P>>,
-    m: usize,
-) -> Vec<Distance<'a, P>> {
-    let mut return_list = Vec::<Distance<'a, P>>::new();
-
-    while let Some(e) = candidates.pop_min() {
-        if return_list.len() >= m {
-            break;
-        }
-
-        if return_list
-            .iter()
-            .all(|r| e.point.distance(r.point) > e.distance)
-        {
-            return_list.push(e);
-        }
-    }
-
-    return_list
-}
-
-pub(crate) fn select_neighbors_max<'a, P: Point>(
-    candidates: &mut MinMaxHeap<Distance<'a, P>>,
-    m: usize,
-) -> Vec<Distance<'a, P>> {
-    let mut return_list = Vec::<Distance<'a, P>>::new();
-    let mut rejects = MinMaxHeap::new();
-
-    while let Some(e) = candidates.pop_min() {
-        if return_list.len() >= m {
-            break;
-        }
-
-        if return_list
-            .iter()
-            .all(|r| e.point.distance(r.point) > e.distance)
-        {
-            return_list.push(e);
-        } else {
-            rejects.push(e);
-        }
-    }
-
-    return_list.extend(rejects.drain_asc().take(m - return_list.len()));
-    return_list
-}
-
-pub(crate) fn neighborhood_aware_projection<T: Point>(
-    bipartite_graph: AdjListGraph<&T>,
-    data: Vec<T>,
-    limit: usize,
-    candidate_size: usize,
-) -> AdjListGraph<T> {
-    let mut projected_graph = AdjListGraph::with_nodes(data);
-
-    for x in 0..projected_graph.size() {
-        let mut out_neighbors = bipartite_graph.neighborhood(x).into_iter().peekable();
-        if out_neighbors.peek().is_none() {
-            continue;
-        }
-
-        let x_point = projected_graph.get(x).expect("point to be in graph");
-        let mut candidates = MinMaxHeap::new();
-        'outer: for s in out_neighbors {
-            for neighbor in bipartite_graph.neighborhood(s) {
-                if neighbor != x {
-                    let neighbor_point =
-                        projected_graph.get(neighbor).expect("point to be in graph");
-                    candidates.push(Distance::new(
-                        x_point.distance(neighbor_point),
-                        neighbor,
-                        neighbor_point,
-                    ));
-
-                    if candidates.len() >= candidate_size {
-                        break 'outer;
-                    }
-                }
-            }
-        }
-
-        let selected_neighbors = select_neighbors_max(&mut candidates, limit);
-        let selected_neighbors = selected_neighbors.iter().map(|d| d.key).collect::<Vec<_>>();
-        projected_graph.set_neighbors(x, selected_neighbors.iter().copied());
-
-        for p in selected_neighbors {
-            let point = projected_graph.get(p).expect("point to be in graph");
-            let mut new_candidates =
-                MinMaxHeap::from_iter(projected_graph.neighborhood(p).chain(vec![x]).map(|n| {
-                    let neighbor_point = projected_graph.get(n).expect("point to be in graph");
-                    Distance::new(point.distance(neighbor_point), n, neighbor_point)
-                }));
-            let selected = select_neighbors_max(&mut new_candidates, limit)
-                .iter()
-                .map(|d| d.key)
-                .collect::<Vec<_>>();
-            projected_graph.set_neighbors(p, selected.into_iter());
-        }
-    }
-
-    projected_graph
-}
 
 pub struct RoarGraph<T> {
     medoid: usize,
     graph: AdjListGraph<T>,
-}
-
-impl<T> RoarGraph<T> {
-    fn new() -> Self {
-        Self {
-            medoid: 0,
-            graph: AdjListGraph::new(),
-        }
-    }
 }
 
 impl<P: Point> RoarGraph<P> {
@@ -187,19 +74,31 @@ pub struct RoarGraphOptions {
 
 pub struct RoarGraphBuilder {
     options: RoarGraphOptions,
+    frequency_map: Vec<usize>,
 }
 
 impl RoarGraphBuilder {
     pub fn new(options: RoarGraphOptions) -> Self {
-        Self { options }
+        Self {
+            options,
+            frequency_map: Vec::new(),
+        }
     }
 
-    pub fn build<T: Point + Clone + Send + Sync>(
-        &self,
-        queries: Vec<T>,
-        data: Vec<T>,
+    pub fn build<P: Point + Clone + Send + Sync>(
+        mut self,
+        queries: Vec<P>,
+        data: Vec<P>,
         ground_truth: Vec<Vec<usize>>,
-    ) -> RoarGraph<T> {
+    ) -> RoarGraph<P> {
+        info!("Building frequency map...");
+        self.frequency_map = vec![0usize; data.len()];
+        for closest in ground_truth.iter() {
+            for &idx in closest {
+                self.frequency_map[idx] += 1;
+            }
+        }
+
         // Construct bipartite graph
         info!("Constructing bipartite graph...");
         let mut bipartite_graph = AdjListGraph::with_nodes(data.iter().chain(&queries).collect());
@@ -241,12 +140,8 @@ impl RoarGraphBuilder {
 
         // Bipartite projection
         info!("Projecting bipartite graph...");
-        let mut projected_graph = neighborhood_aware_projection(
-            bipartite_graph,
-            data.iter().cloned().collect(),
-            self.options.nq,
-            self.options.l,
-        );
+        let mut projected_graph =
+            self.neighborhood_aware_projection(bipartite_graph, data.iter().cloned().collect());
 
         // Connectivity enhancement
         info!("Enhancing connectivity...");
@@ -256,17 +151,18 @@ impl RoarGraphBuilder {
             .enumerate()
             .collect::<Vec<_>>();
         let mut conn_graph = projected_graph.clone();
-        for (i, mut candidates) in all_candidates {
-            let selected_neighbors = select_neighbors(&mut candidates, self.options.m);
+        for (i, candidates) in all_candidates {
+            let selected_neighbors = self.select_neighbors(candidates);
             conn_graph.set_neighbors(i, selected_neighbors.iter().map(|d| d.key));
 
             for p in selected_neighbors {
-                let mut p_candidates =
+                let p_candidates =
                     MinMaxHeap::from_iter(conn_graph.neighborhood(p.key).chain(vec![i]).map(|n| {
                         let neighbor_point = conn_graph.get(n).expect("point not found in graph");
                         Distance::new(p.point.distance(neighbor_point), n, neighbor_point)
                     }));
-                let p_neighbors: Vec<usize> = select_neighbors(&mut p_candidates, self.options.m)
+                let p_neighbors: Vec<usize> = self
+                    .select_neighbors(p_candidates)
                     .into_iter()
                     .map(|d| d.key)
                     .collect();
@@ -285,6 +181,127 @@ impl RoarGraphBuilder {
             medoid,
             graph: projected_graph,
         }
+    }
+
+    fn mod_distances<P: Point>(&self, distances: &mut MinMaxHeap<Distance<'_, P>>) {
+        let mut modified = MinMaxHeap::new();
+        while let Some(mut d) = distances.pop_min() {
+            let freq = self.frequency_map[d.key];
+            d.distance = d.distance * (1.0 + (freq as f32).div(self.frequency_map.len() as f32));
+            modified.push(d);
+        }
+
+        *distances = modified;
+    }
+
+    // Heuristic
+    fn select_neighbors<'a, P: Point>(
+        &self,
+        mut candidates: MinMaxHeap<Distance<'a, P>>,
+    ) -> Vec<Distance<'a, P>> {
+        let mut return_list = Vec::<Distance<'a, P>>::new();
+
+        //self.mod_distances(&mut candidates);
+
+        while let Some(e) = candidates.pop_min() {
+            if return_list.len() >= self.options.m {
+                break;
+            }
+
+            if return_list
+                .iter()
+                .all(|r| e.point.distance(r.point) > e.distance)
+            {
+                return_list.push(e);
+            }
+        }
+
+        return_list
+    }
+
+    fn select_neighbors_max<'a, P: Point>(
+        &self,
+        mut candidates: MinMaxHeap<Distance<'a, P>>,
+    ) -> Vec<Distance<'a, P>> {
+        let mut return_list = Vec::<Distance<'a, P>>::new();
+        let mut rejects = MinMaxHeap::new();
+
+        //self.mod_distances(&mut candidates);
+
+        while let Some(e) = candidates.pop_min() {
+            if return_list.len() >= self.options.m {
+                break;
+            }
+
+            if return_list
+                .iter()
+                .all(|r| e.point.distance(r.point) > e.distance)
+            {
+                return_list.push(e);
+            } else {
+                rejects.push(e);
+            }
+        }
+
+        return_list.extend(rejects.drain_asc().take(self.options.m - return_list.len()));
+        return_list
+    }
+
+    fn neighborhood_aware_projection<P: Point>(
+        &self,
+        bipartite_graph: AdjListGraph<&P>,
+        data: Vec<P>,
+    ) -> AdjListGraph<P> {
+        let mut projected_graph = AdjListGraph::with_nodes(data);
+
+        for x in 0..projected_graph.size() {
+            let mut out_neighbors = bipartite_graph.neighborhood(x).into_iter().peekable();
+            if out_neighbors.peek().is_none() {
+                continue;
+            }
+
+            let x_point = projected_graph.get(x).expect("point to be in graph");
+            let mut candidates = MinMaxHeap::new();
+            'outer: for s in out_neighbors {
+                for neighbor in bipartite_graph.neighborhood(s) {
+                    if neighbor != x {
+                        let neighbor_point =
+                            projected_graph.get(neighbor).expect("point to be in graph");
+                        candidates.push(Distance::new(
+                            x_point.distance(neighbor_point),
+                            neighbor,
+                            neighbor_point,
+                        ));
+
+                        if candidates.len() >= self.options.l {
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+
+            let selected_neighbors = self.select_neighbors_max(candidates);
+            let selected_neighbors = selected_neighbors.iter().map(|d| d.key).collect::<Vec<_>>();
+            projected_graph.set_neighbors(x, selected_neighbors.iter().copied());
+
+            for p in selected_neighbors {
+                let point = projected_graph.get(p).expect("point to be in graph");
+                let new_candidates = MinMaxHeap::from_iter(
+                    projected_graph.neighborhood(p).chain(vec![x]).map(|n| {
+                        let neighbor_point = projected_graph.get(n).expect("point to be in graph");
+                        Distance::new(point.distance(neighbor_point), n, neighbor_point)
+                    }),
+                );
+                let selected = self
+                    .select_neighbors_max(new_candidates)
+                    .iter()
+                    .map(|d| d.key)
+                    .collect::<Vec<_>>();
+                projected_graph.set_neighbors(p, selected.into_iter());
+            }
+        }
+
+        projected_graph
     }
 }
 

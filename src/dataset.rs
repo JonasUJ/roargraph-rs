@@ -1,6 +1,6 @@
 use std::{borrow::Cow, marker::PhantomData, path::Path};
 
-use ndarray::{array, s, Array1, Array2};
+use ndarray::{Array1, Array2, array, s};
 
 use hdf5::{Dataset, Extents, File, H5Type, Result};
 

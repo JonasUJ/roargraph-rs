@@ -1,25 +1,22 @@
+use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
-use std::iter::Sum;
 
 pub trait Point {
-    type DistanceMetric: Send + Sync + Sum + Ord + Copy + Default;
-    fn distance(&self, other: &Self) -> Self::DistanceMetric;
+    fn distance(&self, other: &Self) -> f32;
 }
 
 impl<P> Point for &P
 where
     P: Point,
 {
-    type DistanceMetric = P::DistanceMetric;
-
-    fn distance(&self, other: &Self) -> Self::DistanceMetric {
+    fn distance(&self, other: &Self) -> f32 {
         (*self).distance(*other)
     }
 }
 
 #[derive(Debug)]
 pub struct Distance<'a, P: Point> {
-    pub distance: P::DistanceMetric,
+    pub distance: f32,
     pub key: usize,
     pub point: &'a P,
 }
@@ -35,7 +32,7 @@ impl<'a, P: Point> Clone for Distance<'a, P> {
 }
 
 impl<'a, P: Point> Distance<'a, P> {
-    pub const fn new(distance: P::DistanceMetric, key: usize, point: &'a P) -> Self {
+    pub const fn new(distance: f32, key: usize, point: &'a P) -> Self {
         Self {
             distance,
             key,
@@ -60,7 +57,7 @@ impl<'a, P: Point> Eq for Distance<'a, P> {}
 
 impl<'a, P: Point> Ord for Distance<'a, P> {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.distance.cmp(&other.distance) {
+        match OrderedFloat(self.distance).cmp(&OrderedFloat(other.distance)) {
             Ordering::Equal => self.key.cmp(&other.key),
             ordering => ordering,
         }
