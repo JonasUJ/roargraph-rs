@@ -18,12 +18,14 @@ mod roargraph;
 fn main() {
     tracing_subscriber::registry().with(fmt::layer()).init();
 
-    let path = Path::new("C:/Users/jonas/Downloads/yi-128-ip.hdf5");
+    let path = Path::new("/Users/jonasuj/Downloads/imagenet-align-640-normalized.hdf5");
+    let num_corpus = 250_000;
     let corpus = BufferedDataset::<'_, Row<f32>, _>::open(path, "train")
         .unwrap()
         .into_iter()
+        .take(num_corpus)
         .collect::<Vec<_>>();
-    let num_queries = corpus.len();
+    let num_queries = corpus.len() / 10;
     let queries = BufferedDataset::<'_, Row<f32>, _>::open(path, "learn")
         .unwrap()
         .into_iter()
@@ -36,7 +38,8 @@ fn main() {
     info!("Corpus size: {}", corpus.len());
 
     // Ground truth computation
-    let ground_truth_file = Path::new("ground_truth.bin");
+    let ground_truth_file_name = format!("ground_truth-{}.bin", path.file_name().unwrap().to_str().unwrap());
+    let ground_truth_file = Path::new(ground_truth_file_name.as_str());
     let ground_truth = if ground_truth_file.exists() {
         info!("Reading ground truth...");
         let reader = BufReader::new(File::open(&ground_truth_file).unwrap());
@@ -58,7 +61,7 @@ fn main() {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let writer = BufWriter::new(File::create("ground_truth.bin").unwrap());
+        let writer = BufWriter::new(File::create(ground_truth_file_name).unwrap());
 
         serialize_into(writer, &ground_truth).unwrap();
         ground_truth
@@ -78,10 +81,10 @@ fn main() {
 
     let ground_truth_keys = ground_truth
         .iter()
+        .take(queries.len())
         .map(|v| v.iter().map(|(k, _)| *k).collect())
         .collect::<Vec<_>>();
     let graph = RoarGraphBuilder::new(RoarGraphOptions {
-        nq: 100,
         m: 100,
         l: 500,
     })
@@ -110,7 +113,7 @@ fn main() {
             knn.intersection(&found).count() as f32 / knn.len() as f32
         })
         .sum();
-    recall /= ground_truth.len() as f32;
+    recall /= ground_truth_keys.len() as f32;
     info!("Recall: {:.4}", recall);
 }
 

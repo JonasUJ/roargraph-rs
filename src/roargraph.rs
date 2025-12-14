@@ -3,7 +3,7 @@ use crate::point::{Distance, Point};
 use min_max_heap::MinMaxHeap;
 use rayon::prelude::*;
 use std::collections::{BinaryHeap, HashSet};
-use std::ops::Div;
+use ordered_float::OrderedFloat;
 use tracing::info;
 
 pub struct RoarGraph<T> {
@@ -64,8 +64,6 @@ impl<P: Point> AdjListGraph<P> {
 }
 
 pub struct RoarGraphOptions {
-    /// Number of nearest neighbors to consider for each query
-    pub(crate) nq: usize,
     /// Out-degree bound
     pub(crate) m: usize,
     /// Candidate pool size
@@ -113,29 +111,30 @@ impl RoarGraphBuilder {
         }
 
         info!("Computing medoid...");
-        let medoid = 184379; //7331;
-        //let sample = bipartite_graph
-        //    .adj_lists()
-        //    .iter()
-        //    .skip(data.len())
-        //    .flat_map(|m| m)
-        //    .collect::<HashSet<_>>();
-        //let medoid = sample
-        //    .par_iter()
-        //    .map(|&&p| {
-        //        let point = bipartite_graph.get(p).expect("point to be in graph");
-        //        let total_distance: T::DistanceMetric = sample
-        //            .iter()
-        //            .map(|&&o| {
-        //                let other = bipartite_graph.get(o).expect("point to be in graph");
-        //                point.distance(other)
-        //            })
-        //            .sum();
-        //        (total_distance, p)
-        //    })
-        //    .min_by(|(dist_a, _), (dist_b, _)| dist_a.cmp(dist_b))
-        //    .map(|(_, i)| i)
-        //    .expect("data set is empty");
+        //let medoid = 78861; //im;
+        //let medoid = 184379; //7331;
+        let sample = bipartite_graph
+            .adj_lists()
+            .iter()
+            .skip(data.len())
+            .flat_map(|m| m)
+            .collect::<HashSet<_>>();
+        let medoid = sample
+            .par_iter()
+            .map(|&&p| {
+                let point = bipartite_graph.get(p).expect("point to be in graph");
+                let total_distance: f32 = sample
+                    .iter()
+                    .map(|&&o| {
+                        let other = bipartite_graph.get(o).expect("point to be in graph");
+                        point.distance(other)
+                    })
+                    .sum();
+                (total_distance, p)
+            })
+            .min_by(|(dist_a, _), (dist_b, _)| OrderedFloat(*dist_a).cmp(&OrderedFloat(*dist_b)))
+            .map(|(_, i)| i)
+            .expect("data set is empty");
         info!("Medoid index: {}", medoid);
 
         // Bipartite projection
@@ -187,7 +186,7 @@ impl RoarGraphBuilder {
         let mut modified = MinMaxHeap::new();
         while let Some(mut d) = distances.pop_min() {
             let freq = self.frequency_map[d.key];
-            d.distance = d.distance * (1.0 + (freq as f32).div(self.frequency_map.len() as f32));
+            d.distance = d.distance / (1.0 + (freq as f32));
             modified.push(d);
         }
 
@@ -201,7 +200,7 @@ impl RoarGraphBuilder {
     ) -> Vec<Distance<'a, P>> {
         let mut return_list = Vec::<Distance<'a, P>>::new();
 
-        //self.mod_distances(&mut candidates);
+        self.mod_distances(&mut candidates);
 
         while let Some(e) = candidates.pop_min() {
             if return_list.len() >= self.options.m {
@@ -226,7 +225,7 @@ impl RoarGraphBuilder {
         let mut return_list = Vec::<Distance<'a, P>>::new();
         let mut rejects = MinMaxHeap::new();
 
-        //self.mod_distances(&mut candidates);
+        self.mod_distances(&mut candidates);
 
         while let Some(e) = candidates.pop_min() {
             if return_list.len() >= self.options.m {
