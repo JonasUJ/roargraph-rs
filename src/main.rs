@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::{collections::HashSet, path::Path};
+use serde::{Deserialize, Serialize};
 use tracing::info;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -93,15 +94,32 @@ fn main() {
         .take(queries.len())
         .map(|v| v.iter().map(|(k, _)| *k).collect())
         .collect::<Vec<_>>();
-    let graph = RoarGraphBuilder::new(RoarGraphOptions { m: 100, l: 500 }).build(
-        queries.iter().take(build_count).cloned().collect(),
-        corpus,
-        ground_truth_keys
-            .iter()
-            .take(build_count)
-            .cloned()
-            .collect(),
+
+
+    let graph_file_name = format!(
+        "graph-{}.bin",
+        path.file_name().unwrap().to_str().unwrap()
     );
+    let graph_file = Path::new(graph_file_name.as_str());
+    let graph = if graph_file.exists() {
+        info!("Reading graph...");
+        let reader = BufReader::new(File::open(&graph_file_name).unwrap());
+        deserialize_from(reader).unwrap()
+    } else {
+        let graph = RoarGraphBuilder::new(RoarGraphOptions { m: 100, l: 500 }).build(
+            queries.iter().take(build_count).cloned().collect(),
+            corpus,
+            ground_truth_keys
+                .iter()
+                .take(build_count)
+                .cloned()
+                .collect(),
+        );
+        let writer = BufWriter::new(File::create(graph_file_name).unwrap());
+
+        serialize_into(writer, &graph).unwrap();
+        graph
+    };
 
     let eval_queries = queries
         .iter()
@@ -131,7 +149,7 @@ fn main() {
     info!("Recall: {:.4}", recall);
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct Row<T> {
     data: Vec<T>,
 }

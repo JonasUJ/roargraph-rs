@@ -5,7 +5,9 @@ use rayon::prelude::*;
 use std::collections::{BinaryHeap, HashSet};
 use ordered_float::OrderedFloat;
 use tracing::info;
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 pub struct RoarGraph<T> {
     medoid: usize,
     graph: AdjListGraph<T>,

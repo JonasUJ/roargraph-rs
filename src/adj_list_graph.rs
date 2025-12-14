@@ -1,6 +1,7 @@
 use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AdjListGraph<T> {
     nodes: Vec<T>,
     adj_lists: Vec<HashSet<usize>>,
