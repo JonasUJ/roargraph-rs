@@ -112,7 +112,7 @@ impl RoarGraphBuilder {
 
         info!("Computing medoid...");
         //let medoid = 78861; //im;
-        //let medoid = 184379; //7331;
+        //let medoid = 213373; //ll;
         let sample = bipartite_graph
             .adj_lists()
             .iter()
@@ -156,7 +156,7 @@ impl RoarGraphBuilder {
 
             for p in selected_neighbors {
                 let p_candidates =
-                    MinMaxHeap::from_iter(conn_graph.neighborhood(p.key).chain(vec![i]).map(|n| {
+                    MinMaxHeap::from_iter(conn_graph.neighborhood(p.key).chain(std::iter::once(i)).map(|n| {
                         let neighbor_point = conn_graph.get(n).expect("point not found in graph");
                         Distance::new(p.point.distance(neighbor_point), n, neighbor_point)
                     }));
@@ -165,11 +165,11 @@ impl RoarGraphBuilder {
                     .into_iter()
                     .map(|d| d.key)
                     .collect();
-                conn_graph.set_neighbors(i, p_neighbors.into_iter());
+                conn_graph.set_neighbors(p.key, p_neighbors.into_iter());
             }
         }
 
-        for i in 1..projected_graph.nodes().len() {
+        for i in 0..projected_graph.nodes().len() {
             let mut final_neighbors = projected_graph.neighborhood(i).collect::<HashSet<usize>>();
             final_neighbors.extend(conn_graph.neighborhood(i));
             projected_graph.set_neighbors(i, final_neighbors.into_iter());
@@ -183,6 +183,7 @@ impl RoarGraphBuilder {
     }
 
     fn mod_distances<P: Point>(&self, distances: &mut MinMaxHeap<Distance<'_, P>>) {
+        return;
         let mut modified = MinMaxHeap::new();
         while let Some(mut d) = distances.pop_min() {
             let freq = self.frequency_map[d.key];

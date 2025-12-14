@@ -18,7 +18,8 @@ mod roargraph;
 fn main() {
     tracing_subscriber::registry().with(fmt::layer()).init();
 
-    let path = Path::new("/Users/jonasuj/Downloads/imagenet-align-640-normalized.hdf5");
+    //let path = Path::new("C:/Users/jonas/Downloads/llama-128-ip.hdf5");
+    let path = Path::new("C:/Users/jonas/Downloads/imagenet-align-640-normalized.hdf5");
     let num_corpus = 250_000;
     let corpus = BufferedDataset::<'_, Row<f32>, _>::open(path, "train")
         .unwrap()
@@ -34,11 +35,19 @@ fn main() {
     //let knns = BufferedDataset::<'_, Row<usize>, _>::open(path, "neighbors").unwrap();
     //let distances = BufferedDataset::<'_, Row<f32>, _>::open(path, "distances").unwrap();
 
+    let build_ratio = 2;
+    let build_count = queries.len() / build_ratio;
+
     info!("Number of queries: {}", queries.len());
+    info!("Number of build queries: {}", build_count);
+    info!("Number of eval queries: {}", queries.len() - build_count);
     info!("Corpus size: {}", corpus.len());
 
     // Ground truth computation
-    let ground_truth_file_name = format!("ground_truth-{}.bin", path.file_name().unwrap().to_str().unwrap());
+    let ground_truth_file_name = format!(
+        "ground_truth-{}.bin",
+        path.file_name().unwrap().to_str().unwrap()
+    );
     let ground_truth_file = Path::new(ground_truth_file_name.as_str());
     let ground_truth = if ground_truth_file.exists() {
         info!("Reading ground truth...");
@@ -84,36 +93,41 @@ fn main() {
         .take(queries.len())
         .map(|v| v.iter().map(|(k, _)| *k).collect())
         .collect::<Vec<_>>();
-    let graph = RoarGraphBuilder::new(RoarGraphOptions {
-        m: 100,
-        l: 500,
-    })
-    .build(
-        queries.iter().take(queries.len() / 10).cloned().collect(),
+    let graph = RoarGraphBuilder::new(RoarGraphOptions { m: 100, l: 500 }).build(
+        queries.iter().take(build_count).cloned().collect(),
         corpus,
         ground_truth_keys
             .iter()
-            .take(queries.len() / 10)
+            .take(build_count)
             .cloned()
             .collect(),
     );
 
-    info!("Evaluating recall...");
-    let mut recall: f32 = ground_truth_keys
+    let eval_queries = queries
         .iter()
-        .zip(queries.iter())
-        .collect::<Vec<_>>()
+        .skip(build_count)
+        .cloned()
+        .collect::<Vec<_>>();
+    let eval_ground_truth_keys = ground_truth_keys
+        .iter()
+        .skip(build_count)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    info!("Evaluating recall...");
+    let mut recall: f32 = eval_ground_truth_keys
         .par_iter()
+        .zip(eval_queries.par_iter())
         .map(|(knn, query)| {
             let knn = knn.iter().copied().collect::<HashSet<_>>();
 
-            let found = graph.search(&query, knn.len());
+            let found = graph.search(query, knn.len());
             let found = found.iter().map(|d| d.key).collect::<HashSet<_>>();
 
             knn.intersection(&found).count() as f32 / knn.len() as f32
         })
         .sum();
-    recall /= ground_truth_keys.len() as f32;
+    recall /= eval_ground_truth_keys.len() as f32;
     info!("Recall: {:.4}", recall);
 }
 
