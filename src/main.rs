@@ -1,27 +1,35 @@
+#![allow(unused)]
+
 use crate::dataset::BufferedDataset;
-use crate::point::{Distance, Point};
 use crate::roargraph::{MinK, RoarGraphBuilder, RoarGraphOptions};
+use crate::row::Row;
 use bincode::{deserialize_from, serialize_into};
-use ndarray::Array1;
+use hnsw_itu::{Distance, IndexVis, Point};
 use rayon::prelude::*;
 use std::fs::File;
+use std::io::Write;
 use std::io::{BufReader, BufWriter};
+use std::time::Duration;
 use std::{collections::HashSet, path::Path};
-use serde::{Deserialize, Serialize};
 use tracing::info;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod adj_list_graph;
 mod dataset;
-mod point;
 mod roargraph;
+mod row;
 
 fn main() {
     tracing_subscriber::registry().with(fmt::layer()).init();
 
-    //let path = Path::new("C:/Users/jonas/Downloads/llama-128-ip.hdf5");
-    let path = Path::new("C:/Users/jonas/Downloads/imagenet-align-640-normalized.hdf5");
-    let num_corpus = 250_000;
+    let path = Path::new(
+        "/Users/jonasuj/Code/master-thesis/datasets/data.exclude/imagenet-align-640-normalized.hdf5",
+    );
+    //let path = Path::new("/Users/jonasuj/Code/master-thesis/datasets/data.exclude/yi-128-ip.hdf5");
+    //let path = Path::new("/Users/jonasuj/Downloads/llama-128-ip.hdf5");
+    //let path = Path::new("/Users/jonasuj/Downloads/imagenet-align-640-normalized.hdf5");
+    let outdir = "data.exclude";
+    let num_corpus = 256921;
     let corpus = BufferedDataset::<'_, Row<f32>, _>::open(path, "train")
         .unwrap()
         .into_iter()
@@ -46,7 +54,7 @@ fn main() {
 
     // Ground truth computation
     let ground_truth_file_name = format!(
-        "ground_truth-{}.bin",
+        "{outdir}/ground_truth-{}.bin",
         path.file_name().unwrap().to_str().unwrap()
     );
     let ground_truth_file = Path::new(ground_truth_file_name.as_str());
@@ -95,9 +103,8 @@ fn main() {
         .map(|v| v.iter().map(|(k, _)| *k).collect())
         .collect::<Vec<_>>();
 
-
     let graph_file_name = format!(
-        "graph-{}.bin",
+        "{outdir}/graph-{}.bin",
         path.file_name().unwrap().to_str().unwrap()
     );
     let graph_file = Path::new(graph_file_name.as_str());
@@ -108,7 +115,7 @@ fn main() {
     } else {
         let graph = RoarGraphBuilder::new(RoarGraphOptions { m: 100, l: 500 }).build(
             queries.iter().take(build_count).cloned().collect(),
-            corpus,
+            corpus.iter().cloned().collect(),
             ground_truth_keys
                 .iter()
                 .take(build_count)
@@ -132,44 +139,61 @@ fn main() {
         .cloned()
         .collect::<Vec<_>>();
 
+    let mut vis_count = vec![0usize; corpus.len()];
+    let ef = 10;
     info!("Evaluating recall...");
-    let mut recall: f32 = eval_ground_truth_keys
-        .par_iter()
-        .zip(eval_queries.par_iter())
+    let mut result: Vec<(f32, Duration)> = eval_ground_truth_keys
+        .iter()
+        .zip(eval_queries.iter())
         .map(|(knn, query)| {
             let knn = knn.iter().copied().collect::<HashSet<_>>();
 
-            let found = graph.search(query, knn.len());
+            let mut vis = HashSet::new();
+            let start = std::time::Instant::now();
+            let found = graph.search_vis(query, ef, &ef, &mut vis);
+            let elapsed = start.elapsed();
             let found = found.iter().map(|d| d.key).collect::<HashSet<_>>();
 
-            knn.intersection(&found).count() as f32 / knn.len() as f32
+            for v in vis {
+                vis_count[v.key] += 1;
+            }
+
+            (knn.intersection(&found).count() as f32 / ef as f32, elapsed)
         })
-        .sum();
-    recall /= eval_ground_truth_keys.len() as f32;
-    info!("Recall: {:.4}", recall);
-}
+        .collect();
+    let recall = result.iter().map(|(r, _)| r).sum::<f32>() / eval_ground_truth_keys.len() as f32;
+    let spq = result.iter().map(|(_, e)| e).sum::<Duration>() / eval_ground_truth_keys.len() as u32;
+    info!("Recall@{ef}: {:.4}", recall);
+    info!("SPQ: {:?}", spq);
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Row<T> {
-    data: Vec<T>,
-}
-
-impl<T: Clone> From<Array1<T>> for Row<T> {
-    fn from(value: Array1<T>) -> Self {
-        Self {
-            data: value.to_vec(),
+    let mut frequency_map = vec![0usize; corpus.len()];
+    for closest in ground_truth.iter().take(build_count) {
+        for &(idx, _) in closest {
+            frequency_map[idx] += 1;
         }
     }
-}
 
-impl Point for Row<f32> {
-    fn distance(&self, other: &Self) -> f32 {
-        // Inner product distance
-        -self
-            .data
-            .iter()
-            .zip(other.data.iter())
-            .map(|(&a, &b)| a * b)
-            .sum::<f32>()
+    let outfile = format!(
+        "frequency-{}.txt",
+        path.file_name().unwrap().to_str().unwrap()
+    );
+    let mut file = File::create(outfile).unwrap();
+    for ((p, f), v) in graph
+        .graph
+        .adj_lists()
+        .into_iter()
+        .zip(frequency_map.into_iter())
+        .zip(vis_count.into_iter())
+    {
+        writeln!(file, "{},{},{}", p.len(), f, v).unwrap();
+    }
+
+    let outfile = format!(
+        "roargraph-{}.txt",
+        path.file_name().unwrap().to_str().unwrap()
+    );
+    let mut file = File::create(outfile).unwrap();
+    for p in graph.graph.adj_lists().into_iter() {
+        writeln!(file, "{}", p.len()).unwrap();
     }
 }

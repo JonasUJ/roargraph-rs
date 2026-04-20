@@ -1,11 +1,10 @@
-use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AdjListGraph<T> {
-    nodes: Vec<T>,
-    adj_lists: Vec<HashSet<usize>>,
-    empty: HashSet<usize>,
+    pub nodes: Vec<T>,
+    pub adj_lists: Vec<HashSet<usize>>,
 }
 
 impl<T> AdjListGraph<T> {
@@ -26,8 +25,19 @@ impl<T> AdjListGraph<T> {
         Self {
             nodes,
             adj_lists: vec![HashSet::default(); len],
-            empty: Default::default(),
         }
+    }
+
+    pub fn with_nodes_additional(nodes: Vec<T>, additional: usize) -> Self {
+        let len = nodes.len() + additional;
+        Self {
+            nodes,
+            adj_lists: vec![HashSet::default(); len],
+        }
+    }
+
+    pub fn consume(self) -> (Vec<T>, Vec<HashSet<usize>>) {
+        (self.nodes, self.adj_lists)
     }
 
     fn is_in_bounds(&self, v: usize, w: usize) -> bool {
@@ -123,11 +133,10 @@ impl<T> AdjListGraph<T> {
     }
 
     pub fn neighborhood(&self, v: usize) -> impl Iterator<Item = usize> {
-        if let Some(set) = self.adj_lists.get(v) {
-            return set.iter().copied();
-        }
-
-        self.empty.iter().copied()
+        self.adj_lists
+            .get(v)
+            .into_iter()
+            .flat_map(|set| set.iter().copied())
     }
 
     pub fn size(&self) -> usize {
@@ -140,7 +149,6 @@ impl<T: Clone> Clone for AdjListGraph<T> {
         Self {
             nodes: self.nodes.clone(),
             adj_lists: self.adj_lists.clone(),
-            empty: self.empty.clone(),
         }
     }
 }
@@ -150,7 +158,6 @@ impl<T> Default for AdjListGraph<T> {
         Self {
             nodes: Vec::default(),
             adj_lists: Vec::default(),
-            empty: HashSet::default(),
         }
     }
 }
@@ -162,7 +169,6 @@ impl<T> FromIterator<T> for AdjListGraph<T> {
         Self {
             nodes,
             adj_lists: vec![HashSet::default(); count],
-            empty: Default::default(),
         }
     }
 }

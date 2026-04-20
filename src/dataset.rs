@@ -1,12 +1,64 @@
+use ndarray::{Array1, Array2, array, s};
+use std::ops::Deref;
 use std::{borrow::Cow, marker::PhantomData, path::Path};
 
-use ndarray::{Array1, Array2, array, s};
+use hdf5::{Dataset, DatasetBuilderEmpty, Extents, File, Group, H5Type, Result};
+use sprs::{CsMat, CsMatBase};
 
-use hdf5::{Dataset, Extents, File, H5Type, Result};
+pub type CsrMat<V> = CsMatBase<V, usize, Vec<usize>, Vec<usize>, Vec<V>, usize>;
+
+#[derive(Clone)]
+pub struct H5File {
+    file: File,
+}
+
+impl H5File {
+    pub fn open<P>(path: &P) -> Result<Self>
+    where
+        P: AsRef<Path> + ?Sized,
+    {
+        let file = File::open(path)?;
+        Ok(Self { file })
+    }
+
+    pub fn create<P>(path: P) -> Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        let file = File::create(path)?;
+        Ok(Self { file })
+    }
+
+    pub fn read_csr<V: H5Type + Clone + Default + std::fmt::Debug>(
+        &self,
+        group_name: &str,
+    ) -> Result<CsrMat<V>> {
+        let group = self.file.group(group_name)?;
+
+        let shape: Vec<usize> = group.attr("shape")?.read_1d()?.to_vec();
+        let (rows, cols) = (shape[0], shape[1]);
+
+        let indptr: Vec<usize> = group.dataset("indptr")?.read_1d()?.to_vec();
+        let indices: Vec<usize> = group.dataset("indices")?.read_1d()?.to_vec();
+        let data: Vec<V> = group.dataset("data")?.read_1d()?.to_vec();
+
+        let csr = CsMat::new_from_unsorted((rows, cols), indptr, indices, data).unwrap();
+
+        Ok(csr)
+    }
+}
+
+impl Deref for H5File {
+    type Target = File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file
+    }
+}
 
 #[derive(Clone)]
 pub struct BufferedDataset<'f, T, D> {
-    file: Cow<'f, File>,
+    file: Cow<'f, H5File>,
     dataset: Dataset,
     _phantom: PhantomData<(T, D)>,
 }
@@ -16,7 +68,7 @@ impl<'f, T, D> BufferedDataset<'f, T, D> {
     where
         P: AsRef<Path> + ?Sized,
     {
-        let file = File::open(path)?;
+        let file = H5File::open(path)?;
         let dataset = file.dataset(dataset)?;
         Ok(BufferedDataset {
             file: Cow::Owned(file),
@@ -30,7 +82,7 @@ impl<'f, T, D> BufferedDataset<'f, T, D> {
         P: AsRef<Path>,
         S: Into<Extents>,
     {
-        let file = File::create(path)?;
+        let file = H5File::create(path)?;
         let dataset = file.new_dataset::<u64>().shape(shape).create(dataset)?;
         Ok(BufferedDataset {
             file: Cow::Owned(file),
@@ -39,7 +91,7 @@ impl<'f, T, D> BufferedDataset<'f, T, D> {
         })
     }
 
-    pub fn with_file<S>(file: &'f File, shape: S, dataset: &str) -> Result<Self>
+    pub fn with_file<S>(file: &'f H5File, shape: S, dataset: &str) -> Result<Self>
     where
         S: Into<Extents>,
     {
