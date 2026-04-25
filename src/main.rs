@@ -113,7 +113,12 @@ fn main() {
         let reader = BufReader::new(File::open(&graph_file_name).unwrap());
         deserialize_from(reader).unwrap()
     } else {
-        let graph = RoarGraphBuilder::new(RoarGraphOptions { m: 100, l: 500 }).build(
+        let graph = RoarGraphBuilder::new(RoarGraphOptions {
+            m: 100,
+            l: 500,
+            q: 10.0,
+        })
+        .build(
             queries.iter().take(build_count).cloned().collect(),
             corpus.iter().cloned().collect(),
             ground_truth_keys

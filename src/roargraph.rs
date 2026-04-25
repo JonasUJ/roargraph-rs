@@ -164,6 +164,8 @@ pub struct RoarGraphOptions {
     pub m: usize,
     /// Candidate pool size
     pub l: usize,
+    /// Percentage of corpus used as build queries (0, 100]
+    pub q: f32,
 }
 
 pub struct RoarGraphBuilder {
