@@ -66,6 +66,16 @@ pub struct RoarGraph<T> {
     pub graph: AdjListGraph<T>,
 }
 
+impl<T> RoarGraph<T> {
+    pub fn medoid(&self) -> usize {
+        self.medoid
+    }
+
+    pub fn from_parts(medoid: usize, graph: AdjListGraph<T>) -> Self {
+        Self { medoid, graph }
+    }
+}
+
 impl<P: Point> Index<P> for RoarGraph<P> {
     type Options<'a> = usize;
     fn size(&self) -> usize {
