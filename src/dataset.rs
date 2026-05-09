@@ -193,6 +193,12 @@ where
         self.cur += 1;
         self.buffer.next().map(Into::into)
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.len - self.cur;
+
+        (remaining, Some(remaining))
+    }
 }
 
 struct ArrayIter<D> {
